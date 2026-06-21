@@ -19,7 +19,7 @@ st.title("🧑‍💼 Zyro Dynamics HR Help Desk")
 
 RELEVANCE_THRESHOLD = 0.65
 REFUSAL_MESSAGE = "I can only answer HR-related questions from Zyro Dynamics policy documents."
-FAISS_INDEX_PATH = "."  # Changed to root directory
+FAISS_INDEX_PATH = "." 
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
 PROMPT_TEMPLATE = ChatPromptTemplate.from_template(
@@ -65,6 +65,10 @@ def answer_question(vectorstore, llm, question: str):
 # Main App logic
 vectorstore, llm = load_resources()
 
+# Callback to reset selectbox when chat_input is used
+def clear_select():
+    st.session_state.selected_q = "Select a question..."
+
 # UI: Dropdown + Chat Input
 predefined_questions = [
     "Select a question...",
@@ -73,15 +77,23 @@ predefined_questions = [
     "What are the office working hours?",
     "Where can I find the holiday calendar?"
 ]
-selected_question = st.selectbox("Quick Select:", predefined_questions)
-chat_input = st.chat_input("Or type your HR policy question here...")
 
+selected_question = st.selectbox(
+    "Quick Select:", 
+    predefined_questions, 
+    key="selected_q"
+)
+
+chat_input = st.chat_input("Or type your HR policy question here...", on_submit=clear_select)
+
+# Determine the active question
 question = None
 if selected_question != "Select a question...":
     question = selected_question
 elif chat_input:
     question = chat_input
 
+# Processing
 if question:
     with st.chat_message("user"):
         st.write(question)
