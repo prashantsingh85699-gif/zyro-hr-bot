@@ -10,12 +10,16 @@ from langchain_groq import ChatGroq
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_PROJECT"] = "zyro-rag-challenge"
 
+# API Keys from Streamlit Secrets
+os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
+
 st.set_page_config(page_title="Zyro Dynamics HR Help Desk", page_icon="🧑‍💼")
 st.title("🧑‍💼 Zyro Dynamics HR Help Desk")
 
 RELEVANCE_THRESHOLD = 0.65
 REFUSAL_MESSAGE = "I can only answer HR-related questions from Zyro Dynamics policy documents."
-FAISS_INDEX_PATH = "."
+FAISS_INDEX_PATH = "."  # Changed to root directory
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
 PROMPT_TEMPLATE = ChatPromptTemplate.from_template(
@@ -39,9 +43,6 @@ def load_resources():
     llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
     return vectorstore, llm
 
-def get_llm():
-    return ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
-
 def answer_question(vectorstore, llm, question: str):
     results = vectorstore.similarity_search_with_score(question, k=3) 
     top_score = results[0][1] if results else 0.0
@@ -63,10 +64,31 @@ def answer_question(vectorstore, llm, question: str):
 
 # Main App logic
 vectorstore, llm = load_resources()
-question = st.text_input("Ask an HR policy question:")
+
+# UI: Dropdown + Chat Input
+predefined_questions = [
+    "Select a question...",
+    "What is the company leave policy?",
+    "How do I claim health insurance?",
+    "What are the office working hours?",
+    "Where can I find the holiday calendar?"
+]
+selected_question = st.selectbox("Quick Select:", predefined_questions)
+chat_input = st.chat_input("Or type your HR policy question here...")
+
+question = None
+if selected_question != "Select a question...":
+    question = selected_question
+elif chat_input:
+    question = chat_input
 
 if question:
-    answer, sources, score = answer_question(vectorstore, llm, question)
-    st.markdown(f"**Answer:** {answer}")
-    if sources:
-        st.markdown("**Sources:** " + ", ".join(f"`{s}`" for s in sources))
+    with st.chat_message("user"):
+        st.write(question)
+    
+    with st.chat_message("assistant"):
+        with st.spinner("Searching HR policies..."):
+            answer, sources, score = answer_question(vectorstore, llm, question)
+            st.markdown(f"**Answer:** {answer}")
+            if sources:
+                st.markdown("**Sources:** " + ", ".join(f"`{s}`" for s in sources))
