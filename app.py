@@ -15,7 +15,7 @@ st.title("🧑‍💼 Zyro Dynamics HR Help Desk")
 
 RELEVANCE_THRESHOLD = 0.65
 REFUSAL_MESSAGE = "I can only answer HR-related questions from Zyro Dynamics policy documents."
-FAISS_INDEX_PATH = "zyro_hr_faiss_index_c1000_o200"
+FAISS_INDEX_PATH = "."
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
 PROMPT_TEMPLATE = ChatPromptTemplate.from_template(
