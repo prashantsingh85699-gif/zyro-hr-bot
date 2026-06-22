@@ -7,11 +7,8 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_groq import ChatGroq
 from sentence_transformers import CrossEncoder
 
-# Setup
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_PROJECT"] = "zyro-rag-challenge"
-
-# API Keys from Streamlit Secrets
 os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
 os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
 
@@ -25,13 +22,14 @@ EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
 PROMPT_TEMPLATE = ChatPromptTemplate.from_template(
     """You are an expert HR assistant for Zyro Dynamics company.
-Use ONLY the context below to answer the question accurately and completely.
-If the answer is not in the context, say "The provided policy documents do not contain information regarding this query."
+Use ONLY the context below to answer completely and accurately.
+Include specific numbers, days, and percentages when present.
+If not in context say: "The HR policy documents do not contain information regarding this query."
 
 Context: {context}
 Question: {question}
 
-Provide a detailed, accurate answer based strictly on the context:"""
+Detailed Answer:"""
 )
 
 @st.cache_resource
@@ -45,7 +43,7 @@ def load_resources():
         embedding_model,
         allow_dangerous_deserialization=True
     )
-    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1, max_tokens=1024)
     reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
     return vectorstore, llm, reranker
 
@@ -54,38 +52,29 @@ def rerank_results(reranker, query, docs):
         return []
     pairs = [(query, doc.page_content) for doc in docs]
     scores = reranker.predict(pairs)
-    ranked = [doc for _, doc in sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)]
+    ranked = [d for _, d in sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)]
     return ranked[:5]
 
-def answer_question(vectorstore, llm, reranker, question: str):
-    # Guardrail
+def answer_question(vectorstore, llm, reranker, question):
     results = vectorstore.similarity_search_with_score(question, k=1)
     top_score = results[0][1] if results else 1.5
-
     if top_score >= RELEVANCE_THRESHOLD:
         return REFUSAL_MESSAGE, [], top_score
-
-    # ✅ Improved MMR — fetch more, rerank better
     retriever = vectorstore.as_retriever(
         search_type="mmr",
         search_kwargs={"k": 8, "fetch_k": 20, "lambda_mult": 0.4},
     )
     raw_docs = retriever.invoke(question)
-
-    # ✅ Rerank with CrossEncoder
     final_docs = rerank_results(reranker, question, raw_docs)
-
     context = "\n\n".join(
         f"[{d.metadata.get('source', 'unknown')}] {d.page_content}"
         for d in final_docs
     )
     sources = sorted({d.metadata.get("source", "unknown") for d in final_docs})
-
     chain = PROMPT_TEMPLATE | llm | StrOutputParser()
     answer = chain.invoke({"context": context, "question": question})
     return answer, sources, top_score
 
-# Main App
 vectorstore, llm, reranker = load_resources()
 
 def clear_select():
@@ -99,11 +88,7 @@ predefined_questions = [
     "Where can I find the holiday calendar?"
 ]
 
-selected_question = st.selectbox(
-    "Quick Select:",
-    predefined_questions,
-    key="selected_q"
-)
+selected_question = st.selectbox("Quick Select:", predefined_questions, key="selected_q")
 chat_input = st.chat_input("Or type your HR policy question here...", on_submit=clear_select)
 
 question = None
