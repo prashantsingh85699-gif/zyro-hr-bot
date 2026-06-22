@@ -1,9 +1,10 @@
 streamlit
 langchain
 langchain-community
+langchain-huggingface
 langchain-groq
+langchain-core
 faiss-cpu
 sentence-transformers
-langchain-huggingface
-torch
-torchvision
+rank-bm25
+cryptography
