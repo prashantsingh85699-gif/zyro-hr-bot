@@ -2,68 +2,57 @@ import streamlit as st
 import os
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain_community.vectorstores.utils import DistanceStrategy
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from sentence_transformers import CrossEncoder
 
-# 1. UI Setup
+# 1. UI Configuration
 st.set_page_config(page_title="Zyro HR Help Desk", page_icon="🏢", layout="wide")
 
 # 2. Secret Handling
-def get_key(key_name):
-    if key_name in st.secrets:
-        return st.secrets[key_name]
-    return os.environ.get(key_name)
-
-GROQ_KEY = get_key("GROQ_API_KEY")
-if not GROQ_KEY:
-    st.error("❌ API Key not found in Streamlit Secrets!")
+if "GROQ_API_KEY" not in st.secrets:
+    st.error("GROQ_API_KEY is not set in Streamlit Secrets!")
     st.stop()
-os.environ["GROQ_API_KEY"] = GROQ_KEY
+os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
 
-# 3. Resources (Path Fix)
+# 3. Resource Loading (Fixed Path)
 @st.cache_resource
 def load_resources():
-    # 'os.getcwd()' current directory ka absolute path deta hai
-    current_dir = os.getcwd() 
     emb = HuggingFaceEmbeddings(model_name="BAAI/bge-large-en-v1.5")
-    
-    # Check if files exist at root
-    if not os.path.exists(os.path.join(current_dir, "index.faiss")):
-        st.error(f"❌ index.faiss file nahi mili! Current directory: {current_dir}")
-        st.stop()
-        
-    vs = FAISS.load_local(current_dir, emb, allow_dangerous_deserialization=True, distance_strategy=DistanceStrategy.MAX_INNER_PRODUCT)
+    # Ye line current folder se files load karegi
+    vs = FAISS.load_local(os.getcwd(), emb, allow_dangerous_deserialization=True)
     llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.0)
-    rnk = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-12-v2")
-    return vs, llm, rnk
+    return vs, llm
 
-vs, llm, rnk = load_resources()
+vs, llm = load_resources()
 
-# 4. Chat Interface
-if "messages" not in st.session_state: st.session_state.messages = []
+# 4. Chat History
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# 5. UI Layout
+st.title("🏢 Zyro Dynamics HR Help Desk")
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]): st.markdown(msg["content"])
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-# 5. Chat Input & Processing
-user_input = st.chat_input("Type your HR question here...")
+# 6. Logic
+user_input = st.chat_input("Ask your HR policy question...")
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
-    with st.chat_message("user"): st.markdown(user_input)
+    with st.chat_message("user"):
+        st.markdown(user_input)
     
     with st.chat_message("assistant"):
-        with st.spinner("Searching..."):
-            docs = vs.similarity_search(user_input, k=10)
-            pairs = [(user_input, d.page_content) for d in docs]
-            scores = rnk.predict(pairs)
-            ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
-            top_docs = [d for s, d in ranked[:3]]
+        with st.spinner("Searching HR policies..."):
+            # Retrieval
+            docs = vs.similarity_search(user_input, k=3)
+            context = "\n".join([d.page_content for d in docs])
             
-            context = "\n".join([d.page_content for d in top_docs])
-            prompt = ChatPromptTemplate.from_template("Answer using this context: {context}\nQuestion: {question}")
+            # Response
+            prompt = ChatPromptTemplate.from_template("Answer based on context: {context}\nQuestion: {question}")
             chain = prompt | llm | StrOutputParser()
             ans = chain.invoke({"context": context, "question": user_input})
+            
             st.markdown(ans)
             st.session_state.messages.append({"role": "assistant", "content": ans})
