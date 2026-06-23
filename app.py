@@ -2,107 +2,87 @@ import os
 import streamlit as st
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
+from langchain_community.vectorstores.utils import DistanceStrategy
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_groq import ChatGroq
 from sentence_transformers import CrossEncoder
 
+# Setup Environment
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
-os.environ["LANGCHAIN_PROJECT"] = "zyro-rag-challenge"
-os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
-os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
+os.environ["LANGCHAIN_PROJECT"]    = "zyro-rag-challenge"
+os.environ["GROQ_API_KEY"]         = st.secrets["GROQ_API_KEY"]
+os.environ["LANGCHAIN_API_KEY"]    = st.secrets["LANGCHAIN_API_KEY"]
 
 st.set_page_config(page_title="Zyro Dynamics HR Help Desk", page_icon="🧑‍💼")
 st.title("🧑‍💼 Zyro Dynamics HR Help Desk")
 
-RELEVANCE_THRESHOLD = 1.5
-REFUSAL_MESSAGE = "I don't have enough information in the HR policy documents to answer this question."
+# Pipeline Configuration (Synced with Notebook)
 FAISS_INDEX_PATH = "faiss_index"
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+RETRIEVAL_K = 5
+FINAL_TOP_K = 3
+CROSS_ENCODER_THRESHOLD = 0.5
+LLM_MODEL = "llama-3.3-70b-versatile"
+REFUSAL_MESSAGE = "The HR policy documents do not contain information regarding this query. Please contact HR."
 
-PROMPT_TEMPLATE = ChatPromptTemplate.from_template(
-    """You are an expert HR assistant for Zyro Dynamics company.
-Use ONLY the context below to answer completely and accurately.
-Include specific numbers, days, and percentages when present.
-If not in context say: "The HR policy documents do not contain information regarding this query."
-
-Context: {context}
-Question: {question}
-
-Detailed Answer:"""
+# Prompt Template
+PROMPT = ChatPromptTemplate.from_template(
+    "You are an expert HR assistant for Zyro Dynamics.\n"
+    "Answer using ONLY the provided context. Use exact numbers/dates exactly as written, never round them.\n"
+    "Use bullet points for multi-item answers. If the context only partially answers the question, give what is supported and note what isn't.\n"
+    "If nothing relevant is found, say exactly: The HR policy documents do not contain information regarding this query.\n\n"
+    "Context: {context}\nQuestion: {question}\n\nDetailed Answer:"
 )
 
 @st.cache_resource
 def load_resources():
-    embedding_model = HuggingFaceEmbeddings(
+    # Embeddings
+    emb = HuggingFaceEmbeddings(
         model_name=EMBEDDING_MODEL_NAME,
-        encode_kwargs={"normalize_embeddings": True},
+        encode_kwargs={"normalize_embeddings": True}
     )
-    vectorstore = FAISS.load_local(
-        FAISS_INDEX_PATH,
-        embedding_model,
-        allow_dangerous_deserialization=True
+    # Vectorstore
+    vs = FAISS.load_local(
+        FAISS_INDEX_PATH, emb, allow_dangerous_deserialization=True,
+        distance_strategy=DistanceStrategy.MAX_INNER_PRODUCT
     )
-    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1, max_tokens=1024)
-    reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-    return vectorstore, llm, reranker
+    # LLM & Reranker
+    llm = ChatGroq(model=LLM_MODEL, temperature=0.1, max_tokens=1536)
+    rnk = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    return vs, llm, rnk
 
-def rerank_results(reranker, query, docs):
-    if not docs:
-        return []
-    pairs = [(query, doc.page_content) for doc in docs]
-    scores = reranker.predict(pairs)
-    ranked = [d for _, d in sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)]
-    return ranked[:5]
-
-def answer_question(vectorstore, llm, reranker, question):
-    results = vectorstore.similarity_search_with_score(question, k=1)
-    top_score = results[0][1] if results else 1.5
-    if top_score >= RELEVANCE_THRESHOLD:
-        return REFUSAL_MESSAGE, [], top_score
-    retriever = vectorstore.as_retriever(
-        search_type="mmr",
-        search_kwargs={"k": 8, "fetch_k": 20, "lambda_mult": 0.4},
-    )
+def answer_question(vs, llm, rnk, question):
+    # Retrieval
+    retriever = vs.as_retriever(search_type="mmr", search_kwargs={"k": RETRIEVAL_K, "fetch_k": 10})
     raw_docs = retriever.invoke(question)
-    final_docs = rerank_results(reranker, question, raw_docs)
-    context = "\n\n".join(
-        f"[{d.metadata.get('source', 'unknown')}] {d.page_content}"
-        for d in final_docs
-    )
-    sources = sorted({d.metadata.get("source", "unknown") for d in final_docs})
-    chain = PROMPT_TEMPLATE | llm | StrOutputParser()
-    answer = chain.invoke({"context": context, "question": question})
-    return answer, sources, top_score
+    
+    if not raw_docs:
+        return REFUSAL_MESSAGE, []
+    
+    # Reranking
+    pairs = [(question, d.page_content) for d in raw_docs]
+    scores = rnk.predict(pairs)
+    
+    if max(scores) < CROSS_ENCODER_THRESHOLD:
+        return REFUSAL_MESSAGE, []
+    
+    ranked = sorted(zip(scores, raw_docs), key=lambda x: x[0], reverse=True)
+    final = [d for _, d in ranked][:FINAL_TOP_K]
+    
+    # Generation
+    context = "\n\n".join(f"[{d.metadata.get('source','?')}] {d.page_content}" for d in final)
+    sources = sorted({d.metadata.get("source", "unknown") for d in final})
+    answer = (PROMPT | llm | StrOutputParser()).invoke({"context": context, "question": question})
+    return answer, sources
 
-vectorstore, llm, reranker = load_resources()
-
-def clear_select():
-    st.session_state.selected_q = "Select a question..."
-
-predefined_questions = [
-    "Select a question...",
-    "What is the company leave policy?",
-    "How do I claim health insurance?",
-    "What are the office working hours?",
-    "Where can I find the holiday calendar?"
-]
-
-selected_question = st.selectbox("Quick Select:", predefined_questions, key="selected_q")
-chat_input = st.chat_input("Or type your HR policy question here...", on_submit=clear_select)
-
-question = None
-if selected_question != "Select a question...":
-    question = selected_question
-elif chat_input:
-    question = chat_input
+# Execution
+vs, llm, rnk = load_resources()
+question = st.chat_input("Ask your HR policy question...")
 
 if question:
-    with st.chat_message("user"):
-        st.write(question)
+    with st.chat_message("user"): st.write(question)
     with st.chat_message("assistant"):
-        with st.spinner("Searching HR policies..."):
-            answer, sources, score = answer_question(vectorstore, llm, reranker, question)
-            st.markdown(f"**Answer:** {answer}")
-            if sources:
-                st.markdown("**Sources:** " + ", ".join(f"`{s}`" for s in sources))
+        answer, sources = answer_question(vs, llm, rnk, question)
+        st.markdown(f"**Answer:** {answer}")
+        if sources: st.markdown("**Sources:** " + ", ".join(f"`{s}`" for s in sources))
