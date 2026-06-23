@@ -15,24 +15,25 @@ st.set_page_config(page_title="Zyro HR Help Desk", page_icon="🏢", layout="wid
 with st.sidebar:
     st.title("🏢 Zyro Dynamics")
     st.markdown("### HR Policy AI Assistant")
-    st.info("Ask me anything about company leave, insurance, or office policies.")
+    st.info("Ask me anything about company policies.")
     
-# Initialize Resources
+# Initialize Resources (Using "." as path because files are in the root)
 @st.cache_resource
 def load_resources():
     emb = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2", encode_kwargs={"normalize_embeddings": True})
-    vs = FAISS.load_local("faiss_index", emb, allow_dangerous_deserialization=True, distance_strategy=DistanceStrategy.MAX_INNER_PRODUCT)
+    # Changed path from "faiss_index" to "." because files are in the root
+    vs = FAISS.load_local(".", emb, allow_dangerous_deserialization=True, distance_strategy=DistanceStrategy.MAX_INNER_PRODUCT)
     llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
     rnk = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
     return vs, llm, rnk
 
 vs, llm, rnk = load_resources()
 
-# Session State for Chat History
+# Session State
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display Chat History
+# Display Chat
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
@@ -40,7 +41,7 @@ for msg in st.session_state.messages:
             with st.expander("View Sources"):
                 st.write(", ".join(msg["sources"]))
 
-# Pipeline
+# RAG Pipeline
 def process_query(question):
     retriever = vs.as_retriever(search_type="mmr", search_kwargs={"k": 5})
     docs = retriever.invoke(question)
@@ -48,7 +49,7 @@ def process_query(question):
     scores = rnk.predict(pairs)
     
     final_docs = [d for s, d in sorted(zip(scores, docs), key=lambda x: x[0], reverse=True) if s > 0.5]
-    if not final_docs: return "Sorry, no policy found.", []
+    if not final_docs: return "Sorry, no relevant policy found.", []
     
     context = "\n\n".join([d.page_content for d in final_docs[:3]])
     sources = list(set([d.metadata.get("source", "Policy Doc") for d in final_docs]))
@@ -57,7 +58,7 @@ def process_query(question):
     answer = (prompt | llm | StrOutputParser()).invoke({"context": context, "question": question})
     return answer, sources
 
-# Input Logic
+# UI Input
 predefined = ["Select...", "What is the leave policy?", "How to claim insurance?", "Office hours?", "Holiday calendar?"]
 selected = st.selectbox("Quick Select:", predefined)
 user_input = st.chat_input("Type your question here...")
