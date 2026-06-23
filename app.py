@@ -10,14 +10,14 @@ from sentence_transformers import CrossEncoder
 
 # Setup Environment
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
-os.environ["LANGCHAIN_PROJECT"]    = "zyro-rag-challenge"
-os.environ["GROQ_API_KEY"]         = st.secrets["GROQ_API_KEY"]
-os.environ["LANGCHAIN_API_KEY"]    = st.secrets["LANGCHAIN_API_KEY"]
+os.environ["LANGCHAIN_PROJECT"] = "zyro-rag-challenge"
+os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
 
 st.set_page_config(page_title="Zyro Dynamics HR Help Desk", page_icon="🧑‍💼")
 st.title("🧑‍💼 Zyro Dynamics HR Help Desk")
 
-# Pipeline Configuration (Synced with Notebook)
+# Pipeline Configuration
 FAISS_INDEX_PATH = "faiss_index"
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 RETRIEVAL_K = 5
