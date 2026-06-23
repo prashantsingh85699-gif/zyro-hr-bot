@@ -1,3 +1,4 @@
+# Updated app.py with 5+ Quick Select questions
 import os
 import streamlit as st
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -18,7 +19,7 @@ st.set_page_config(page_title="Zyro Dynamics HR Help Desk", page_icon="🧑‍�
 st.title("🧑‍💼 Zyro Dynamics HR Help Desk")
 
 # Pipeline Configuration
-FAISS_INDEX_PATH = "." # Changed to root as requested
+FAISS_INDEX_PATH = "." 
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 RETRIEVAL_K = 5
 FINAL_TOP_K = 3
@@ -60,8 +61,17 @@ def answer_question(vs, llm, rnk, question):
 
 vs, llm, rnk = load_resources()
 
-# Quick Select Logic
-predefined_questions = ["Select a question...", "What is the company leave policy?", "How do I claim health insurance?", "What are the office working hours?"]
+# Updated Quick Select Logic (5+ questions)
+predefined_questions = [
+    "Select a question...",
+    "What is the company leave policy?",
+    "How do I claim health insurance?",
+    "What are the office working hours?",
+    "Where can I find the holiday calendar?",
+    "What is the remote work policy?",
+    "How do I submit an expense report?"
+]
+
 selected_q = st.selectbox("Quick Select:", predefined_questions)
 chat_input = st.chat_input("Or type your HR policy question here...")
 
