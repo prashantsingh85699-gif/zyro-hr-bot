@@ -18,7 +18,7 @@ st.set_page_config(page_title="Zyro Dynamics HR Help Desk", page_icon="🧑‍�
 st.title("🧑‍💼 Zyro Dynamics HR Help Desk")
 
 # Pipeline Configuration
-FAISS_INDEX_PATH = "faiss_index"
+FAISS_INDEX_PATH = "."
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 RETRIEVAL_K = 5
 FINAL_TOP_K = 3
