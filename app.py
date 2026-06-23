@@ -3,28 +3,41 @@ import os
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_community.vectorstores.utils import DistanceStrategy
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_groq import ChatGroq
 from sentence_transformers import CrossEncoder
 
-# 1. Page Config
-st.set_page_config(page_title="Zyro HR Help Desk", layout="wide")
+# 1. UI Setup
+st.set_page_config(page_title="Zyro HR Help Desk", page_icon="🏢", layout="wide")
 
-# 2. Key Handling (SABSE IMPORTANT: Agar Cloud par ho toh secrets, warna error)
-try:
-    os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
-    os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
-    os.environ["LANGCHAIN_TRACING_V2"] = "true"
-    os.environ["LANGCHAIN_PROJECT"] = "zyro-rag-challenge"
-except:
-    st.error("⚠️ API Keys nahi mili! Streamlit Cloud Settings > Secrets mein keys add karo.")
+# 2. Secret Handling (Fool-proof)
+def get_key(key_name):
+    # Try streamlit secrets first
+    if key_name in st.secrets:
+        return st.secrets[key_name]
+    # Then try environment variables
+    return os.environ.get(key_name)
+
+GROQ_KEY = get_key("GROQ_API_KEY")
+if not GROQ_KEY:
+    st.error("❌ API Key nahi mili! Streamlit Cloud Secrets mein GROQ_API_KEY daalo.")
     st.stop()
 
-# 3. Resources (Cached)
+os.environ["GROQ_API_KEY"] = GROQ_KEY
+
+# 3. Sidebar
+with st.sidebar:
+    st.title("🏢 Zyro Dynamics")
+    st.markdown("### HR Policy AI Assistant")
+    st.info("Ask me anything about company HR policies.")
+    if st.button("Clear Chat History"):
+        st.session_state.messages = []
+
+# 4. Resources
 @st.cache_resource
 def load_resources():
-    emb = HuggingFaceEmbeddings(model_name="BAAI/bge-large-en-v1.5", encode_kwargs={"normalize_embeddings": True})
+    emb = HuggingFaceEmbeddings(model_name="BAAI/bge-large-en-v1.5")
     vs = FAISS.load_local(".", emb, allow_dangerous_deserialization=True, distance_strategy=DistanceStrategy.MAX_INNER_PRODUCT)
     llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.0)
     rnk = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-12-v2")
@@ -32,34 +45,34 @@ def load_resources():
 
 vs, llm, rnk = load_resources()
 
-# 4. Chat UI
+# 5. UI Logic
 if "messages" not in st.session_state: st.session_state.messages = []
-
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+    with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-def process_query(question):
-    retriever = vs.as_retriever(search_type="similarity", search_kwargs={"k": 15})
-    docs = retriever.invoke(question)
-    pairs = [(question, d.page_content) for d in docs]
-    scores = rnk.predict(pairs)
-    ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
-    top_docs = [d for s, d in ranked[:6] if s > 0.0]
-    
-    if not top_docs: return "No policy found.", []
-    context = "\n\n".join(f"[{d.metadata.get('source', 'Policy')}]\n{d.page_content}" for d in top_docs)
-    sources = list(set(d.metadata.get("source", "Policy Doc") for d in top_docs))
-    
-    chain = ChatPromptTemplate.from_template("Answer based on Context: {context}\nQuestion: {question}") | llm | StrOutputParser()
-    return chain.invoke({"context": context, "question": question}), sources
+# 6. Chat Input
+predefined = ["Select...", "What is the leave policy?", "How to claim health insurance?"]
+selected = st.selectbox("Quick questions:", predefined)
+user_input = st.chat_input("Type your question...")
+question = user_input if user_input else (selected if selected != predefined[0] else None)
 
-# 5. Input
-question = st.chat_input("Ask HR policy question...")
 if question:
     st.session_state.messages.append({"role": "user", "content": question})
     with st.chat_message("user"): st.markdown(question)
+    
     with st.chat_message("assistant"):
-        ans, srcs = process_query(question)
-        st.markdown(ans)
-        st.session_state.messages.append({"role": "assistant", "content": ans})
+        with st.spinner("Searching HR policy..."):
+            # Retrieval
+            docs = vs.similarity_search(question, k=10)
+            pairs = [(question, d.page_content) for d in docs]
+            scores = rnk.predict(pairs)
+            ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
+            top_docs = [d for s, d in ranked[:3]]
+            
+            context = "\n".join([d.page_content for d in top_docs])
+            prompt = ChatPromptTemplate.from_template("Answer using this context: {context}\nQuestion: {question}")
+            chain = prompt | llm | StrOutputParser()
+            ans = chain.invoke({"context": context, "question": question})
+            
+            st.markdown(ans)
+            st.session_state.messages.append({"role": "assistant", "content": ans})
