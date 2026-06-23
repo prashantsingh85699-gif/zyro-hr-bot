@@ -26,57 +26,43 @@ CROSS_ENCODER_THRESHOLD = 0.5
 LLM_MODEL = "llama-3.3-70b-versatile"
 REFUSAL_MESSAGE = "The HR policy documents do not contain information regarding this query. Please contact HR."
 
-# Prompt Template
-PROMPT = ChatPromptTemplate.from_template(
-    "You are an expert HR assistant for Zyro Dynamics.\n"
-    "Answer using ONLY the provided context. Use exact numbers/dates exactly as written, never round them.\n"
-    "Use bullet points for multi-item answers. If the context only partially answers the question, give what is supported and note what isn't.\n"
-    "If nothing relevant is found, say exactly: The HR policy documents do not contain information regarding this query.\n\n"
-    "Context: {context}\nQuestion: {question}\n\nDetailed Answer:"
-)
+# Check if index exists before loading
+if not os.path.exists(FAISS_INDEX_PATH):
+    st.error(f"❌ Error: The folder '{FAISS_INDEX_PATH}' is not found in your repository. Please ensure it is uploaded.")
+    st.stop()
 
 @st.cache_resource
 def load_resources():
-    # Embeddings
-    emb = HuggingFaceEmbeddings(
-        model_name=EMBEDDING_MODEL_NAME,
-        encode_kwargs={"normalize_embeddings": True}
-    )
-    # Vectorstore
-    vs = FAISS.load_local(
-        FAISS_INDEX_PATH, emb, allow_dangerous_deserialization=True,
-        distance_strategy=DistanceStrategy.MAX_INNER_PRODUCT
-    )
-    # LLM & Reranker
+    emb = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL_NAME, encode_kwargs={"normalize_embeddings": True})
+    vs = FAISS.load_local(FAISS_INDEX_PATH, emb, allow_dangerous_deserialization=True, distance_strategy=DistanceStrategy.MAX_INNER_PRODUCT)
     llm = ChatGroq(model=LLM_MODEL, temperature=0.1, max_tokens=1536)
     rnk = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
     return vs, llm, rnk
 
+# Prompt Template
+PROMPT = ChatPromptTemplate.from_template(
+    "You are an expert HR assistant for Zyro Dynamics.\n"
+    "Answer using ONLY the provided context. If nothing relevant is found, say: " + REFUSAL_MESSAGE + "\n\n"
+    "Context: {context}\nQuestion: {question}\n\nDetailed Answer:"
+)
+
 def answer_question(vs, llm, rnk, question):
-    # Retrieval
     retriever = vs.as_retriever(search_type="mmr", search_kwargs={"k": RETRIEVAL_K, "fetch_k": 10})
     raw_docs = retriever.invoke(question)
+    if not raw_docs: return REFUSAL_MESSAGE, []
     
-    if not raw_docs:
-        return REFUSAL_MESSAGE, []
-    
-    # Reranking
     pairs = [(question, d.page_content) for d in raw_docs]
     scores = rnk.predict(pairs)
-    
-    if max(scores) < CROSS_ENCODER_THRESHOLD:
-        return REFUSAL_MESSAGE, []
+    if max(scores) < CROSS_ENCODER_THRESHOLD: return REFUSAL_MESSAGE, []
     
     ranked = sorted(zip(scores, raw_docs), key=lambda x: x[0], reverse=True)
     final = [d for _, d in ranked][:FINAL_TOP_K]
     
-    # Generation
     context = "\n\n".join(f"[{d.metadata.get('source','?')}] {d.page_content}" for d in final)
     sources = sorted({d.metadata.get("source", "unknown") for d in final})
     answer = (PROMPT | llm | StrOutputParser()).invoke({"context": context, "question": question})
     return answer, sources
 
-# Execution
 vs, llm, rnk = load_resources()
 question = st.chat_input("Ask your HR policy question...")
 
