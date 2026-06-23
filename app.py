@@ -18,7 +18,7 @@ st.set_page_config(page_title="Zyro Dynamics HR Help Desk", page_icon="🧑‍�
 st.title("🧑‍💼 Zyro Dynamics HR Help Desk")
 
 # Pipeline Configuration
-FAISS_INDEX_PATH = "."
+FAISS_INDEX_PATH = "." # Changed to root as requested
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 RETRIEVAL_K = 5
 FINAL_TOP_K = 3
@@ -26,10 +26,12 @@ CROSS_ENCODER_THRESHOLD = 0.5
 LLM_MODEL = "llama-3.3-70b-versatile"
 REFUSAL_MESSAGE = "The HR policy documents do not contain information regarding this query. Please contact HR."
 
-# Check if index exists before loading
-if not os.path.exists(FAISS_INDEX_PATH):
-    st.error(f"❌ Error: The folder '{FAISS_INDEX_PATH}' is not found in your repository. Please ensure it is uploaded.")
-    st.stop()
+# Prompt Template
+PROMPT = ChatPromptTemplate.from_template(
+    "You are an expert HR assistant for Zyro Dynamics.\n"
+    "Answer using ONLY the provided context. If nothing relevant is found, say: " + REFUSAL_MESSAGE + "\n\n"
+    "Context: {context}\nQuestion: {question}\n\nDetailed Answer:"
+)
 
 @st.cache_resource
 def load_resources():
@@ -38,13 +40,6 @@ def load_resources():
     llm = ChatGroq(model=LLM_MODEL, temperature=0.1, max_tokens=1536)
     rnk = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
     return vs, llm, rnk
-
-# Prompt Template
-PROMPT = ChatPromptTemplate.from_template(
-    "You are an expert HR assistant for Zyro Dynamics.\n"
-    "Answer using ONLY the provided context. If nothing relevant is found, say: " + REFUSAL_MESSAGE + "\n\n"
-    "Context: {context}\nQuestion: {question}\n\nDetailed Answer:"
-)
 
 def answer_question(vs, llm, rnk, question):
     retriever = vs.as_retriever(search_type="mmr", search_kwargs={"k": RETRIEVAL_K, "fetch_k": 10})
@@ -64,7 +59,13 @@ def answer_question(vs, llm, rnk, question):
     return answer, sources
 
 vs, llm, rnk = load_resources()
-question = st.chat_input("Ask your HR policy question...")
+
+# Quick Select Logic
+predefined_questions = ["Select a question...", "What is the company leave policy?", "How do I claim health insurance?", "What are the office working hours?"]
+selected_q = st.selectbox("Quick Select:", predefined_questions)
+chat_input = st.chat_input("Or type your HR policy question here...")
+
+question = selected_q if selected_q != "Select a question..." else chat_input
 
 if question:
     with st.chat_message("user"): st.write(question)
