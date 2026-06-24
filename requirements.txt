@@ -8,3 +8,5 @@ faiss-cpu
 sentence-transformers
 rank-bm25
 cryptography
+torch
+torchvision
