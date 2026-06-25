@@ -92,12 +92,18 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_groq import ChatGroq
 from sentence_transformers import CrossEncoder
 
-# Page Config
-st.set_page_config(page_title="Zyro HR Auditor", page_icon="🏢", layout="wide")
+# Page Configuration
+st.set_page_config(page_title="Zyro HR Help Desk", page_icon="🏢", layout="wide")
 
-# Zenith Prompt (Same as our notebook)
+# Setup Environment
+os.environ["LANGCHAIN_TRACING_V2"] = "true"
+os.environ["LANGCHAIN_PROJECT"] = "zyro-rag-challenge"
+os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
+
+# Zenith Prompt (Notebook wala)
 prompt_template = """
-SYSTEM: You are the Zyro Dynamics HR Compliance Auditor.
+SYSTEM: You are the Zyro Dynamics HR Compliance Auditor. Your task is to perform high-precision information extraction.
 
 ### MANDATORY RULES:
 1. AUTHORITY: Answer strictly using the provided Context. If info is missing, output exactly: "The HR policy documents do not contain information regarding this query."
@@ -116,6 +122,12 @@ QUESTION: {question}
 ANSWER:
 """
 
+# Sidebar Branding
+with st.sidebar:
+    st.title("🏢 Zyro Dynamics")
+    st.markdown("### HR Policy AI Assistant")
+    st.info("Ask me anything about company policies.")
+
 @st.cache_resource
 def load_resources():
     emb = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2", encode_kwargs={"normalize_embeddings": True})
@@ -126,54 +138,61 @@ def load_resources():
 
 vs, llm, rnk = load_resources()
 
-# UI Layout
-st.title("🏢 Zyro Dynamics HR Auditor")
-st.markdown("---")
+# Session State for History
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# Quick Select Logic
-predefined = [
-    "Select a question...", 
-    "What is the leave policy?", 
-    "How do I claim health insurance?", 
-    "What are the office working hours?", 
-    "Where can I find the holiday calendar?", 
-    "What is the work from home policy?"
-]
-selected = st.selectbox("💡 Quick Select:", predefined)
+# Display Chat
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+        if "sources" in msg and msg["sources"]:
+            with st.expander("View Sources"):
+                st.write(", ".join(msg["sources"]))
 
-# RAG Engine
+# High-Performance RAG Pipeline
 def process_query(question):
+    # 1. Retrieval (k=8 for better recall)
     retriever = vs.as_retriever(search_type="mmr", search_kwargs={"k": 8})
     docs = retriever.invoke(question)
+    
+    # 2. Reranking
     pairs = [(question, d.page_content) for d in docs]
     scores = rnk.predict(pairs)
     
+    # 3. Guardrail Filter (s > 0.05)
     final_docs = [d for s, d in sorted(zip(scores, docs), key=lambda x: x[0], reverse=True) if s > 0.05]
+    
+    # Exact Refusal Match
     if not final_docs: 
         return "The HR policy documents do not contain information regarding this query.", []
     
     context = "\n\n".join([d.page_content for d in final_docs[:5]])
+    
+    # Clean Source Filenames
     sources = list({os.path.basename(d.metadata.get("source", "unknown.pdf")) for d in final_docs})
     
+    # Execution
     prompt = ChatPromptTemplate.from_template(prompt_template)
     answer = (prompt | llm | StrOutputParser()).invoke({"context": context, "question": question})
     return answer, sources
 
-# Chat Interface
-if "messages" not in st.session_state: st.session_state.messages = []
+# UI Input
+predefined = ["Select...", "What is the leave policy?", "How to claim insurance?", "Office hours?", "Holiday calendar?", "WFH Policy?"]
+selected = st.selectbox("Quick Select:", predefined)
+user_input = st.chat_input("Type your question here...")
 
-# Logic to handle both dropdown and text input
-user_text = st.chat_input("Or type your own question...")
-question = user_text if user_text else (selected if selected != "Select a question..." else None)
+question = user_input if user_input else (selected if selected != "Select..." else None)
 
 if question:
     st.session_state.messages.append({"role": "user", "content": question})
     with st.chat_message("user"): st.markdown(question)
     
     with st.chat_message("assistant"):
-        with st.spinner("Auditing..."):
+        with st.spinner("Auditing policy..."):
             ans, srcs = process_query(question)
             st.markdown(ans)
             if srcs:
-                with st.expander("View Sources"): st.write(", ".join(srcs))
+                with st.expander("View Sources"):
+                    st.write(", ".join(srcs))
             st.session_state.messages.append({"role": "assistant", "content": ans, "sources": srcs})
