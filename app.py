@@ -1,8 +1,116 @@
+# import os
+# import streamlit as st
+# from langchain_huggingface import HuggingFaceEmbeddings
+# from langchain_community.vectorstores import FAISS
+# from langchain_community.vectorstores.utils import DistanceStrategy
+# from langchain_core.prompts import ChatPromptTemplate
+# from langchain_core.output_parsers import StrOutputParser
+# from langchain_groq import ChatGroq
+# from sentence_transformers import CrossEncoder
+
+# # Page Configuration
+# st.set_page_config(page_title="Zyro HR Help Desk", page_icon="🏢", layout="wide")
+
+# # Setup Environment
+# os.environ["LANGCHAIN_TRACING_V2"] = "true"
+# os.environ["LANGCHAIN_PROJECT"] = "zyro-rag-challenge"
+# os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+# os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
+
+# RAG_PROMPT = ChatPromptTemplate.from_template("""
+# SYSTEM: You are the Zyro Dynamics HR Compliance Auditor. Your task is to provide precise, policy-based extraction.
+# ### MANDATORY RULES:
+# 1. AUTHORITY: Answer strictly using the provided Context. If info is missing, output exactly: "The HR policy documents do not contain information regarding this query."
+# 2. CITATION: Every claim must end with [Source: filename.pdf].
+# 3. ZERO FILLER: No intros/outros. Start immediately with the answer.
+# 4. VERBATIM: Quote figures/dates exactly as written.
+# ### OUTPUT FORMAT:
+# - Steps: Numbered list.
+# - Rules/Benefits: Bullet points.
+# - Facts: Direct, concise sentence.
+# ---
+# CONTEXT: {context}
+# QUESTION: {question}
+# ANSWER:
+# """)
+# # Sidebar Branding
+# with st.sidebar:
+#     st.title("🏢 Zyro Dynamics")
+#     st.markdown("### HR Policy AI Assistant")
+#     st.info("Ask me anything about company policies.")
+
+# @st.cache_resource
+# def load_resources():
+#     emb = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2", encode_kwargs={"normalize_embeddings": True})
+#     vs = FAISS.load_local(".", emb, allow_dangerous_deserialization=True, distance_strategy=DistanceStrategy.MAX_INNER_PRODUCT)
+#     llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
+#     rnk = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+#     return vs, llm, rnk
+
+# vs, llm, rnk = load_resources()
+
+# # Session State for History
+# if "messages" not in st.session_state:
+#     st.session_state.messages = []
+
+# # Display Chat
+# for msg in st.session_state.messages:
+#     with st.chat_message(msg["role"]):
+#         st.markdown(msg["content"])
+#         if "sources" in msg and msg["sources"]:
+#             with st.expander("View Sources"):
+#                 st.write(", ".join(msg["sources"]))
+
+# # High-Performance RAG Pipeline
+# def process_query(question):
+#     # 1. Retrieval (k=8 for better recall)
+#     retriever = vs.as_retriever(search_type="mmr", search_kwargs={"k": 8})
+#     docs = retriever.invoke(question)
+    
+#     # 2. Reranking
+#     pairs = [(question, d.page_content) for d in docs]
+#     scores = rnk.predict(pairs)
+    
+#     # 3. Guardrail Filter (s > 0.05)
+#     final_docs = [d for s, d in sorted(zip(scores, docs), key=lambda x: x[0], reverse=True) if s > 0.05]
+    
+#     # Exact Refusal Match
+#     if not final_docs: 
+#         return "The HR policy documents do not contain information regarding this query.", []
+    
+#     context = "\n\n".join([d.page_content for d in final_docs[:5]])
+    
+#     # Clean Source Filenames
+#     sources = list({os.path.basename(d.metadata.get("source", "unknown.pdf")) for d in final_docs})
+    
+
+#     answer = (RAG_PROMPT | llm | StrOutputParser()).invoke({"context": context, "question": question})
+#     return answer, sources
+
+# # UI Input
+# predefined = ["Select...", "What is the leave policy?", "How to claim insurance?", "Office hours?", "Holiday calendar?", "WFH Policy?"]
+# selected = st.selectbox("Quick Select:", predefined)
+# user_input = st.chat_input("Type your question here...")
+
+# question = user_input if user_input else (selected if selected != "Select..." else None)
+
+# if question:
+#     st.session_state.messages.append({"role": "user", "content": question})
+#     with st.chat_message("user"): st.markdown(question)
+    
+#     with st.chat_message("assistant"):
+#         with st.spinner("Auditing policy..."):
+#             ans, srcs = process_query(question)
+#             st.markdown(ans)
+#             if srcs:
+#                 with st.expander("View Sources"):
+#                     st.write(", ".join(srcs))
+#             st.session_state.messages.append({"role": "assistant", "content": ans, "sources": srcs})
+%%writefile app.py
 import os
 import streamlit as st
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain_community.vectorstores.utils import DistanceStrategy
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_groq import ChatGroq
@@ -11,49 +119,77 @@ from sentence_transformers import CrossEncoder
 # Page Configuration
 st.set_page_config(page_title="Zyro HR Help Desk", page_icon="🏢", layout="wide")
 
-# Setup Environment
-os.environ["LANGCHAIN_TRACING_V2"] = "true"
-os.environ["LANGCHAIN_PROJECT"] = "zyro-rag-challenge"
+# Secrets
 os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
 os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
 
-RAG_PROMPT = ChatPromptTemplate.from_template("""
-SYSTEM: You are the Zyro Dynamics HR Compliance Auditor. Your task is to provide precise, policy-based extraction.
-### MANDATORY RULES:
-1. AUTHORITY: Answer strictly using the provided Context. If info is missing, output exactly: "The HR policy documents do not contain information regarding this query."
-2. CITATION: Every claim must end with [Source: filename.pdf].
-3. ZERO FILLER: No intros/outros. Start immediately with the answer.
-4. VERBATIM: Quote figures/dates exactly as written.
-### OUTPUT FORMAT:
-- Steps: Numbered list.
-- Rules/Benefits: Bullet points.
-- Facts: Direct, concise sentence.
----
-CONTEXT: {context}
+# ✅ FIX 1: from_messages instead of from_template
+RAG_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", """You are an HR policy assistant for Zyro Dynamics.
+Answer questions using ONLY the information in the CONTEXT below. Never use outside knowledge.
+
+RULES:
+1. Give complete answers. Include ALL relevant details — numbers, dates, eligibility conditions, amounts, exceptions.
+2. Quote all figures, percentages, dates, and policy names exactly as written in the source.
+3. End every answer with [Source: filename.pdf].
+4. Do not add greetings, intros, or closing remarks. Start directly with the answer.
+
+FORMAT:
+- Policy rules / entitlements / benefits → bullet points
+- Steps or process → numbered list
+- Single specific fact → one direct sentence"""),
+
+    ("human", """CONTEXT:
+{context}
+
 QUESTION: {question}
-ANSWER:
-""")
-# Sidebar Branding
-with st.sidebar:
-    st.title("🏢 Zyro Dynamics")
-    st.markdown("### HR Policy AI Assistant")
-    st.info("Ask me anything about company policies.")
+
+ANSWER:""")
+])
 
 @st.cache_resource
 def load_resources():
     emb = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2", encode_kwargs={"normalize_embeddings": True})
-    vs = FAISS.load_local(".", emb, allow_dangerous_deserialization=True, distance_strategy=DistanceStrategy.MAX_INNER_PRODUCT)
+    vs = FAISS.load_local(".", emb, allow_dangerous_deserialization=True)
     llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
     rnk = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
     return vs, llm, rnk
 
 vs, llm, rnk = load_resources()
 
-# Session State for History
+# Sidebar
+with st.sidebar:
+    st.title("🏢 Zyro Dynamics")
+    st.markdown("### HR Policy AI Assistant")
+    st.info("Ask me anything about company policies.")
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display Chat
+# Logic
+def process_query(question):
+    retriever = vs.as_retriever(search_type="mmr", search_kwargs={"k": 8})
+    docs = retriever.invoke(question)
+    pairs = [(question, d.page_content) for d in docs]
+    scores = rnk.predict(pairs)
+
+    # ✅ FIX 2: Threshold 0.05 → 2.0 with fallback
+    ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
+    final_docs = [d for s, d in ranked if s > 2.0] or [d for s, d in ranked[:2]]
+
+    if not final_docs:
+        return "I can only answer HR-related questions from Zyro Dynamics policy documents.", []
+
+    context = "\n\n".join(
+        f"--- Source: {os.path.basename(d.metadata.get('source', 'unknown.pdf'))} ---\n{d.page_content}"
+        for d in final_docs[:5]
+    )
+    sources = sorted({os.path.basename(d.metadata.get("source", "unknown.pdf")) for d in final_docs[:5]})
+
+    answer = (RAG_PROMPT | llm | StrOutputParser()).invoke({"context": context, "question": question})
+    return answer, sources
+
+# UI
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
@@ -61,45 +197,18 @@ for msg in st.session_state.messages:
             with st.expander("View Sources"):
                 st.write(", ".join(msg["sources"]))
 
-# High-Performance RAG Pipeline
-def process_query(question):
-    # 1. Retrieval (k=8 for better recall)
-    retriever = vs.as_retriever(search_type="mmr", search_kwargs={"k": 8})
-    docs = retriever.invoke(question)
-    
-    # 2. Reranking
-    pairs = [(question, d.page_content) for d in docs]
-    scores = rnk.predict(pairs)
-    
-    # 3. Guardrail Filter (s > 0.05)
-    final_docs = [d for s, d in sorted(zip(scores, docs), key=lambda x: x[0], reverse=True) if s > 0.05]
-    
-    # Exact Refusal Match
-    if not final_docs: 
-        return "The HR policy documents do not contain information regarding this query.", []
-    
-    context = "\n\n".join([d.page_content for d in final_docs[:5]])
-    
-    # Clean Source Filenames
-    sources = list({os.path.basename(d.metadata.get("source", "unknown.pdf")) for d in final_docs})
-    
-
-    answer = (RAG_PROMPT | llm | StrOutputParser()).invoke({"context": context, "question": question})
-    return answer, sources
-
-# UI Input
-predefined = ["Select...", "What is the leave policy?", "How to claim insurance?", "Office hours?", "Holiday calendar?", "WFH Policy?"]
+predefined = ["Select...", "What is the leave policy?", "How to claim insurance?", "Office hours?", "Holiday calendar?"]
 selected = st.selectbox("Quick Select:", predefined)
 user_input = st.chat_input("Type your question here...")
-
 question = user_input if user_input else (selected if selected != "Select..." else None)
 
 if question:
     st.session_state.messages.append({"role": "user", "content": question})
-    with st.chat_message("user"): st.markdown(question)
-    
+    with st.chat_message("user"):
+        st.markdown(question)
+
     with st.chat_message("assistant"):
-        with st.spinner("Auditing policy..."):
+        with st.spinner("Thinking..."):
             ans, srcs = process_query(question)
             st.markdown(ans)
             if srcs:
