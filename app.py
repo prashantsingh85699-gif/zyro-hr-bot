@@ -101,28 +101,26 @@ os.environ["LANGCHAIN_PROJECT"] = "zyro-rag-challenge"
 os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
 os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
 
-# Zenith Prompt (Notebook wala)
-prompt_template = """
-SYSTEM: You are the Zyro Dynamics HR Compliance Auditor. Your task is to provide precise, policy-based extraction.
+RAG_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", """You are an HR policy assistant for Zyro Dynamics.
+Answer employee questions using ONLY the provided context from Zyro Dynamics HR policy documents.
 
-### MANDATORY RULES:
-1. AUTHORITY: Answer strictly using the provided Context. If info is missing, output exactly: "The HR policy documents do not contain information regarding this query."
-2. CITATION: Every claim must end with [Source: filename.pdf].
-3. ZERO FILLER: No intros/outros. Start immediately with the answer.
-4. VERBATIM: Quote figures/dates exactly as written. No rounding.
+RULES:
+1. Use ONLY information from the context. Never use outside knowledge.
+2. For out-of-scope questions (not related to Zyro Dynamics HR policies) → respond exactly:
+   "I can only answer HR-related questions from Zyro Dynamics policy documents."
+3. Keep answers complete, accurate, and policy-accurate — include all relevant details like days, amounts, eligibility, and conditions.
+4. Quote exact numbers, dates, and figures as written in the documents.
+5. End every answer with the source: [Source: filename.pdf]
+6. Do not add greetings, filler, or summaries."""),
 
-### OUTPUT FORMAT:
-- Steps: Numbered list (1., 2., ...).
-- Rules/Benefits: Bullet points.
-- Facts: Direct, concise sentence.
-
----
-CONTEXT: {context}
+    ("human", """CONTEXT:
+{context}
 
 QUESTION: {question}
 
-ANSWER:
-"""
+ANSWER:""")
+])
 
 # Sidebar Branding
 with st.sidebar:
@@ -174,9 +172,8 @@ def process_query(question):
     # Clean Source Filenames
     sources = list({os.path.basename(d.metadata.get("source", "unknown.pdf")) for d in final_docs})
     
-    # Execution
-    prompt = ChatPromptTemplate.from_template(prompt_template)
-    answer = (prompt | llm | StrOutputParser()).invoke({"context": context, "question": question})
+
+    answer = (RAG_PROMPT | llm | StrOutputParser()).invoke({"context": context, "question": question})
     return answer, sources
 
 # UI Input
