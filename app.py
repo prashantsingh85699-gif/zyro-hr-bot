@@ -106,7 +106,6 @@
 #                 with st.expander("View Sources"):
 #                     st.write(", ".join(srcs))
 #             st.session_state.messages.append({"role": "assistant", "content": ans, "sources": srcs})
-%%writefile app.py
 import os
 import streamlit as st
 from langchain_huggingface import HuggingFaceEmbeddings
